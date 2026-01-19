@@ -1,5 +1,4 @@
 import networkx as nx
-import PySpice.Logging.Logging as Logging
 from PySpice.Spice.Parser import SpiceParser
 import json
 
@@ -9,7 +8,7 @@ class AnalogConstraintExtractor:
         self.constraints = {"symmetry": [], "groups": []}
 
     def read_netlist(self, spice_file_path):
-        """讀取 SPICE Netlist 並建立 PySpice 電路物件"""
+        """Read SPICE Netlist and build PySpice circuit object"""
         parser = SpiceParser(path=spice_file_path)
         circuit = parser.build_circuit()
         
@@ -29,40 +28,44 @@ class AnalogConstraintExtractor:
                 self._process_elements(subckt.elements)
 
     def _circuit_to_graph(self, circuit):
-        """將 PySpice 電路轉換為 NetworkX 二分圖 (Bipartite Graph)"""
+        """Convert PySpice circuit to NetworkX Bipartite Graph"""
         self.graph.clear()
         
-        # 1. 處理 Top Level Elements
+        # 1. Process Top Level Elements
         self._process_elements(circuit.elements)
         
-        # 2. 處理 Circuit 物件中已知的 Subcircuits
+        # 2. Process Known Subcircuits in Circuit object
         for subckt in circuit.subcircuits:
             self._process_elements(subckt.elements)
 
     def _process_elements(self, elements):
-        """統一處理元件列表"""
+        """Unified processing for element lists"""
         for element in elements:
-            # 簡單判斷是否為 MOS (通常 M 開頭)
+            # Simple check for MOS (Usually starts with M)
             if element.name.upper().startswith('M'):
-                # 建立 Device 節點
-                device_name = element.name
-                # ... (後續邏輯搬移至此)
                 self._add_device_node(element)
 
     def _add_device_node(self, element):
-        """將單個元件加入圖形"""
+        """Add a single device to the graph"""
         device_name = element.name
-        # 屬性提取 (Model, W, L)
+        # Attribute Extraction (Model, W, L)
+        # PySpice parsed parameters usually map directly to attributes
+        # W -> width, L -> length
         try:
             w = str(getattr(element, 'width', ''))
             l = str(getattr(element, 'length', ''))
         except Exception:
+            # Fallback if attributes are missing
             w = ""
             l = ""
+
         model = str(element.model)
 
         self.graph.add_node(device_name, type='device', model=model, w=w, l=l, subtype='nfet' if 'nfet' in model else 'pfet')
 
+        # Connect Nets
+        # element.pins is a list, usually ordered Drain, Gate, Source, Bulk
+        # Use str(pin.node) to get the connected Net name
         try:
              pins = {
                 'D': str(element.pins[0].node),
@@ -70,20 +73,25 @@ class AnalogConstraintExtractor:
                 'S': str(element.pins[2].node)
             }
         except (IndexError, AttributeError):
+            # Skip or log if pin count is incorrect or parsing fails
             return
 
         for pin_type, net_name in pins.items():
+            # Ensure Net node exists
             if not self.graph.has_node(net_name):
                 self.graph.add_node(net_name, type='net')
+            
+            # Create Edge (Device -> Net), mark pin type
+            # MultiGraph allows duplicate edges, necessary for Diode-connected (D and G to same Net)
             self.graph.add_edge(device_name, net_name, pin=pin_type)
 
     def identify_diff_pairs(self):
-        """識別差動對 (Differential Pairs)"""
-        # 邏輯: 
-        # 1. 兩顆 MOS (M1, M2)
-        # 2. 相同的 Model, W, L
-        # 3. Source 連接到同一個 Net (Tail)
-        # 4. Drain 連接到不同的 Net (避免是並聯元件)
+        """Identify Differential Pairs"""
+        # Logic: 
+        # 1. Two MOS devices (M1, M2)
+        # 2. Same Model, W, L
+        # 3. Sources connected to the same Net (Tail)
+        # 4. Drains connected to different Nets (avoid parallel devices)
         
         devices = [n for n, d in self.graph.nodes(data=True) if d.get('type') == 'device']
         visited = set()
@@ -99,7 +107,7 @@ class AnalogConstraintExtractor:
                 if self._is_diff_pair(m1, m2):
                     self.constraints["symmetry"].append({
                         "name": f"sym_{m1}_{m2}",
-                        "netA": m1,  # 實際上應該是 Net 或 Block，這裡簡化為 Device
+                        "netA": m1,  # Should technically be Net or Block, simplified to Device here
                         "netB": m2,
                         "type": "symmetry"
                     })
@@ -111,20 +119,20 @@ class AnalogConstraintExtractor:
         node1 = self.graph.nodes[m1]
         node2 = self.graph.nodes[m2]
 
-        # 檢查屬性一致性
+        # Check attribute consistency
         if node1['model'] != node2['model'] or node1['w'] != node2['w'] or node1['l'] != node2['l']:
             return False
 
-        # 檢查連接關係
-        # 取得 m1, m2 的 Source net
+        # Check connectivity
+        # Get Source net for m1, m2
         s1 = self._get_neighbor_net(m1, 'S')
         s2 = self._get_neighbor_net(m2, 'S')
         
-        # Source 必須共接
+        # Sources must be shared
         if not s1 or not s2 or s1 != s2:
             return False
             
-        # Drain 通常不共接 (若是共接可能是並聯)
+        # Drains usually not shared (if shared, might be parallel devices)
         d1 = self._get_neighbor_net(m1, 'D')
         d2 = self._get_neighbor_net(m2, 'D')
         if d1 == d2:
@@ -133,16 +141,16 @@ class AnalogConstraintExtractor:
         return True
 
     def identify_current_mirrors(self):
-        """識別電流鏡 (Current Mirrors)"""
-        # 邏輯:
-        # 1. 兩顆 MOS (M3, M4) 共享 Gate
-        # 2. 其中一顆是 Diode-connected (Gate == Drain)
+        """Identify Current Mirrors"""
+        # Logic:
+        # 1. Two MOS devices (M3, M4) share Gate
+        # 2. One of them is Diode-connected (Gate == Drain)
         
         devices = [n for n, d in self.graph.nodes(data=True) if d.get('type') == 'device']
-        # visited = set() # 避免重複加入 Constraint (如有必要)
+        # visited = set() # Avoid adding duplicate Constraint if necessary
 
-        # 這裡簡化邏輯，只要成對就列出
-        # 可能需要更複雜的 Group 邏輯處理多輸出的 Current Mirror
+        # Simplified logic: list all pairs found
+        # May need more complex Group logic for multi-output Current Mirrors
         
         for i in range(len(devices)):
             m1 = devices[i]
@@ -157,25 +165,25 @@ class AnalogConstraintExtractor:
                     })
 
     def _is_current_mirror(self, m1, m2):
-        # 檢查 Gate 是否相連
+        # Check if Gates are connected
         g1 = self._get_neighbor_net(m1, 'G')
         g2 = self._get_neighbor_net(m2, 'G')
         
         if not g1 or not g2 or g1 != g2:
             return False
             
-        # 檢查是否有 Diode Connection
-        # 對於 Current Mirror，Gate Net 必須等於 (M1的Drain) OR (M2的Drain)
+        # Check for Diode Connection
+        # For Current Mirror, Gate Net must equal (M1 Drain) OR (M2 Drain)
         is_m1_diode = (g1 == self._get_neighbor_net(m1, 'D'))
         is_m2_diode = (g2 == self._get_neighbor_net(m2, 'D'))
         
         return is_m1_diode or is_m2_diode
 
     def _get_neighbor_net(self, device, pin_type):
-        """輔助函式：取得特定 Pin 連接的 Net"""
+        """Helper: Get Net connected to a specific Pin"""
         for neighbor in self.graph.neighbors(device):
-            # 對於 MultiGraph，neighbors 仍然只回傳 distinct nodes
-            # 使用 get_edge_data 獲取所有邊的資料
+            # For MultiGraph, neighbors returns distinct nodes
+            # Use get_edge_data to get all edges
             # MultiGraph: get_edge_data(u, v) -> {key: {attr}, ...}
             edges = self.graph.get_edge_data(device, neighbor)
             for key, attr in edges.items():
@@ -184,8 +192,8 @@ class AnalogConstraintExtractor:
         return None
 
     def export_constraints(self, output_path):
-        """輸出 Constraints 為 JSON"""
-        # ALIGN 格式範例調整
+        """Export Constraints to JSON"""
+        # ALIGN format adjustments
         output_data = []
         
         # Symmetry constraints
@@ -193,12 +201,12 @@ class AnalogConstraintExtractor:
             output_data.append({
                 "constraint": "SymmetricBlocks",
                 "pairs": [[sym["netA"], sym["netB"]]],
-                "direction": "V" # 假設垂直對稱
+                "direction": "V" # Assume Vertical Symmetry
             })
             
         # Group constraints (Current Mirror)
-        # ALIGN 可能沒有直接的 CurrentMirror constraint，通常也是對稱或 Group
-        # 這裡示範用 Group
+        # ALIGN might not have direct CurrentMirror constraint, typically Symmetry or Group
+        # Using Group here as example
         for group in self.constraints["groups"]:
             output_data.append({
                 "constraint": "GroupBlocks",
@@ -211,5 +219,5 @@ class AnalogConstraintExtractor:
         print(f"Constraints exported to {output_path}")
 
 if __name__ == "__main__":
-    # 簡單測試用
+    # Simple test stub
     pass

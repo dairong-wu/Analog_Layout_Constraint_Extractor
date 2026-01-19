@@ -9,15 +9,15 @@ import tempfile
 class TestAnalogConstraintExtractor(unittest.TestCase):
     def setUp(self):
         self.extractor = AnalogConstraintExtractor()
-        # 為了測試，我們可以直接操作 self.extractor.graph，或者 mock 讀檔
-        # 但最真實的是建立一個臨時 sp 檔案
+        # For testing, we can manipulate self.extractor.graph directly or mock reading
+        # But creating a temporary sp file is the most realistic
         
     def create_dummy_netlist(self, filename, content):
         with open(filename, 'w') as f:
             f.write(content)
 
     def test_case_1_success(self):
-        """Case 1: 驗證差動對與電流鏡識別"""
+        """Case 1: Verify Differential Pair and Current Mirror identification"""
         netlist_content = """
 * Testbench for Constraint Extraction
 M1 out_n in_n tail 0 sky130_fd_pr__nfet_01v8 W=10u L=0.15u
@@ -31,26 +31,26 @@ Iss tail 0 200u
             tmp_path = tmp.name
 
         try:
-            # 讀取 Netlist
+            # Read Netlist
             self.extractor.read_netlist(tmp_path)
             
-            # 手動觸發 NetworkX 繪圖 (Optional for visual check, skip in automated test)
+            # Manually trigger NetworkX drawing (Optional for visual check, skip in automated test)
             # self.extractor.draw_graph()
 
-            # 執行識別
+            # Execute Identification
             self.extractor.identify_diff_pairs()
             self.extractor.identify_current_mirrors()
             
-            # 驗證 Symmetry (M1, M2)
+            # Verify Symmetry (M1, M2)
             sym_constraints = self.extractor.constraints["symmetry"]
             found_diff_pair = False
             for c in sym_constraints:
-                # 簡單檢查是否包含 M1, M2
+                # Simple check if M1, M2 are included
                 if (c['netA'] == 'M1' and c['netB'] == 'M2') or (c['netA'] == 'M2' and c['netB'] == 'M1'):
                     found_diff_pair = True
             self.assertTrue(found_diff_pair, "Failed to identify differential pair M1/M2")
 
-            # 驗證 Current Mirror (M3, M4)
+            # Verify Current Mirror (M3, M4)
             group_constraints = self.extractor.constraints["groups"]
             found_mirror = False
             for c in group_constraints:
@@ -62,7 +62,7 @@ Iss tail 0 200u
             os.remove(tmp_path)
 
     def test_case_2_negative(self):
-        """Case 2: 驗證不對稱電路"""
+        """Case 2: Verify Asymmetric Circuit"""
         netlist_content = """
 * Asymmetric Circuit
 M1 out_n in_n tail 0 sky130_fd_pr__nfet_01v8 W=10u L=0.15u
@@ -81,7 +81,7 @@ M2 out_p in_p tail 0 sky130_fd_pr__nfet_01v8 W=5u L=0.15u
             self.extractor.read_netlist(tmp_path)
             self.extractor.identify_diff_pairs()
             
-            # 應該找不到對稱
+            # Should not find symmetry
             self.assertEqual(len(self.extractor.constraints["symmetry"]), 0, "Should not identify asymmetric pair as symmetric")
             
         finally:
@@ -89,7 +89,7 @@ M2 out_p in_p tail 0 sky130_fd_pr__nfet_01v8 W=5u L=0.15u
 
     def test_visualization_stub(self):
         """Stub for graphical visualization"""
-        # 由於環境問題，這裡僅確認 NetworkX 是否有節點
+        # Due to environment issues, only verify if NetworkX has nodes
         self.extractor.graph.add_node("TestDev", type='device')
         self.extractor.graph.add_node("TestNet", type='net')
         self.extractor.graph.add_edge("TestDev", "TestNet", pin='D')
