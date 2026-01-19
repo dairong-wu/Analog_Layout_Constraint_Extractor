@@ -1,53 +1,51 @@
-# Analog-Layout-Constraint-Extractor
+# Analog-Layout-Constraint-Extractor 🚀
 
-一個基於圖論 (Graph Theory) 的類比電路佈局約束自動提取工具，支援 ALIGN 格式。
+A Graph Theory-based tool for automatic extraction of analog circuit layout constraints, supporting **ALIGN** compatible formats.
 
-此工具能夠讀取 SPICE Netlist，將其轉換為圖形結構，並自動識別常見的類比電路結構（如差動對 Differential Pairs、電流鏡 Current Mirrors），最後輸出對應的佈局約束檔案。
+This tool parses SPICE netlists, transforms them into a graph representation, and automatically identifies critical analog circuit structures (e.g., **Differential Pairs**, **Current Mirrors**). It then generates the corresponding layout constraint files required for automated placement and routing.
 
-## 功能特色
-- **SPICE 解析**: 使用 `PySpice` 解析標準 Netlist。
-- **圖形引擎**: 使用 `NetworkX` 建立 Bipartite Graph (Device-Net)。
-- **自動識別**:
-    - Differential Pairs (同型號、同尺寸、共源極)。
-    - Current Mirrors (共閘極、Diode-connected)。
-- **ALIGN 支援**: 輸出符合 ALIGN 工具格式的 JSON 約束檔。
+## ✨ Features
 
-## 安裝
+- **Robust SPICE Parsing**: Leverages `PySpice` to parse standard SPICE netlists.
+- **Graph-Based Engine**: Utilizes `NetworkX` to construct a **Bipartite Graph** (representing Device-Net connectivity).
+- **Automated Heuristic Recognition**:
+    - **Differential Pairs**: Identifies pairs based on matching device models, identical sizing ($W/L$), and common-source topology.
+    - **Current Mirrors**: Detects gate-sharing configurations with diode-connected reference devices.
+- **ALIGN Compatibility**: Exports JSON constraint files formatted for the **ALIGN** (Analog Layout, Integrated Circuit Automatic Generation) framework.
 
-需要 Python 3.8+ 環境。
+## 🛠 Installation
+
+Requires **Python 3.8+**.
 
 ```bash
-# 安裝相依套件
-pip install PySpice networkx matplotlib
-```
+# Install dependencies
+pip install PySpice networkx matplotlib```
 
-注意：`PySpice` 可能需要安裝底層 SPICE 引擎（如 Ngspice）。
+Note: PySpice may require a local SPICE engine installation (e.g., Ngspice).
 
-## 快速開始
+🚀 Quick Start
+1. Prepare Netlist
+Prepare a .sp file (e.g., amplifier.sp).
 
-### 1. 準備 Netlist
-準備一個 `.sp` 檔案，例如 `amplifier.sp`。
+2. Run Extraction Tool
+Use the AnalogConstraintExtractor class within your script:
 
-### 2. 執行提取工具
-(需自行撰寫或呼叫 `AnalogConstraintExtractor` 類別)
+```Python
+from src.extractor import AnalogConstraintExtractor
 
-```python
-from analog_constraint_extractor import AnalogConstraintExtractor
+# Initialize with netlist content
+extractor = AnalogConstraintExtractor(netlist_path="amplifier.sp")
+extractor.build_graph()
 
-extractor = AnalogConstraintExtractor()
-extractor.read_netlist("amplifier.sp")
-
-# 執行識別
+# Execute recognition algorithms
 extractor.identify_diff_pairs()
 extractor.identify_current_mirrors()
 
-# 輸出結果
-extractor.export_constraints("amplifier_constraints.json")
-```
+# Export ALIGN-ready constraints
+extractor.export_constraints("output/constraints.json")```
+🧪 Testing
+The project includes a suite of automated unit tests to verify extraction logic:
 
-## 測試
-專案包含自動化測試腳本：
+```Bash
 
-```bash
-python3 -m unittest tests/test_extractor.py
-```
+python3 -m unittest tests/test_extractor.py```
