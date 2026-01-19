@@ -12,59 +12,70 @@ class AnalogConstraintExtractor:
         """讀取 SPICE Netlist 並建立 PySpice 電路物件"""
         parser = SpiceParser(path=spice_file_path)
         circuit = parser.build_circuit()
+        
         self._circuit_to_graph(circuit)
+        
+        # [Fix] PySpice build_circuit() ignores uninstantiated subcircuits.
+        # But parser.subcircuits contains the list of SubCircuitStatement objects found during parsing.
+        # We need to build them manually if circuit.subcircuits is empty.
+        
+        if hasattr(parser, 'subcircuits') and parser.subcircuits:
+            # parser.subcircuits is a list of SubCircuitStatement
+            # We need to turn them into SubCircuit objects to access elements easily
+            for subckt_statment in parser.subcircuits:
+                # Manually build the subcircuit
+                # pass 0 as ground node reference (dummy)
+                subckt = subckt_statment.build(0) 
+                self._process_elements(subckt.elements)
 
     def _circuit_to_graph(self, circuit):
         """將 PySpice 電路轉換為 NetworkX 二分圖 (Bipartite Graph)"""
         self.graph.clear()
         
-        # 遍歷所有元件 (這裡是針對 MOS)
-        for element in circuit.elements:
+        # 1. 處理 Top Level Elements
+        self._process_elements(circuit.elements)
+        
+        # 2. 處理 Circuit 物件中已知的 Subcircuits
+        for subckt in circuit.subcircuits:
+            self._process_elements(subckt.elements)
+
+    def _process_elements(self, elements):
+        """統一處理元件列表"""
+        for element in elements:
             # 簡單判斷是否為 MOS (通常 M 開頭)
-            # PySpice 中 element.name 通常是 M1, M2...
             if element.name.upper().startswith('M'):
                 # 建立 Device 節點
                 device_name = element.name
-                # 屬性提取 (Model, W, L)
-                # PySpice 模型參數通常在 element.model (若是單純參數) 或 element.parameters
-                # 注意: PySpice 解析出來的參數可能需要轉字串或數值
-                
-                # PySpice 解析出來的參數通常直接映射為屬性
-                # W -> width, L -> length
-                try:
-                    w = str(getattr(element, 'width', ''))
-                    l = str(getattr(element, 'length', ''))
-                except Exception:
-                    # Fallback if attributes are missing
-                    w = ""
-                    l = ""
+                # ... (後續邏輯搬移至此)
+                self._add_device_node(element)
 
-                model = str(element.model)
+    def _add_device_node(self, element):
+        """將單個元件加入圖形"""
+        device_name = element.name
+        # 屬性提取 (Model, W, L)
+        try:
+            w = str(getattr(element, 'width', ''))
+            l = str(getattr(element, 'length', ''))
+        except Exception:
+            w = ""
+            l = ""
+        model = str(element.model)
 
-                self.graph.add_node(device_name, type='device', model=model, w=w, l=l, subtype='nfet' if 'nfet' in model else 'pfet')
+        self.graph.add_node(device_name, type='device', model=model, w=w, l=l, subtype='nfet' if 'nfet' in model else 'pfet')
 
-                # 連接 Net
-                # element.pins 是一個 list，順序通常是 Drain, Gate, Source, Bulk
-                # 使用 str(pin.node) 獲取連接的 Net 名稱
-                
-                try:
-                    pins = {
-                        'D': str(element.pins[0].node),
-                        'G': str(element.pins[1].node),
-                        'S': str(element.pins[2].node)
-                    }
-                except (IndexError, AttributeError):
-                    # 如果 pin 數量不對或解析錯誤，跳過或紀錄
-                    continue
-                
-                for pin_type, net_name in pins.items():
-                    # 確保 Net 節點存在
-                    if not self.graph.has_node(net_name):
-                        self.graph.add_node(net_name, type='net')
-                    
-                    # 建立邊 (Device -> Net), 標記 pin 類型
-                    # MultiGraph 允許重複邊，這對於 Diode-connected (D與G連同一個Net) 是必須的
-                    self.graph.add_edge(device_name, net_name, pin=pin_type)
+        try:
+             pins = {
+                'D': str(element.pins[0].node),
+                'G': str(element.pins[1].node),
+                'S': str(element.pins[2].node)
+            }
+        except (IndexError, AttributeError):
+            return
+
+        for pin_type, net_name in pins.items():
+            if not self.graph.has_node(net_name):
+                self.graph.add_node(net_name, type='net')
+            self.graph.add_edge(device_name, net_name, pin=pin_type)
 
     def identify_diff_pairs(self):
         """識別差動對 (Differential Pairs)"""
