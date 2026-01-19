@@ -11,7 +11,7 @@ This tool parses SPICE netlists, transforms them into a graph representation, an
 - **Automated Heuristic Recognition**:
     - **Differential Pairs**: Identifies pairs based on matching device models, identical sizing ($W/L$), and common-source topology.
     - **Current Mirrors**: Detects gate-sharing configurations with diode-connected reference devices.
-- **ALIGN Compatibility**: Exports JSON constraint files formatted for the **ALIGN** (Analog Layout, Integrated Circuit Automatic Generation) framework.
+- **ALIGN Compatibility**: Exports JSON constraint files formatted for the **ALIGN** framework.
 
 ## 🛠 Installation
 
@@ -19,33 +19,38 @@ Requires **Python 3.8+**.
 
 ```bash
 # Install dependencies
-pip install PySpice networkx matplotlib```
+pip install -r requirements.txt
+```
 
-Note: PySpice may require a local SPICE engine installation (e.g., Ngspice).
+*Note: `PySpice` may require a local SPICE engine installation (e.g., Ngspice).*
 
-🚀 Quick Start
-1. Prepare Netlist
-Prepare a .sp file (e.g., amplifier.sp).
+## 🚀 Quick Start
 
-2. Run Extraction Tool
-Use the AnalogConstraintExtractor class within your script:
+### 1. Prepare Netlist
+Prepare a `.sp` file (e.g., `amplifier.sp`).
 
-```Python
-from src.extractor import AnalogConstraintExtractor
+### 2. Run Extraction Tool
+Use the `AnalogConstraintExtractor` class within your script:
 
-# Initialize with netlist content
-extractor = AnalogConstraintExtractor(netlist_path="amplifier.sp")
-extractor.build_graph()
+```python
+from analog_constraint_extractor import AnalogConstraintExtractor
+
+# Initialize and parse netlist
+extractor = AnalogConstraintExtractor()
+extractor.read_netlist("amplifier.sp")
 
 # Execute recognition algorithms
 extractor.identify_diff_pairs()
 extractor.identify_current_mirrors()
 
 # Export ALIGN-ready constraints
-extractor.export_constraints("output/constraints.json")```
-🧪 Testing
+extractor.export_constraints("amplifier_constraints.json")
+```
+
+## 🧪 Testing
+
 The project includes a suite of automated unit tests to verify extraction logic:
 
-```Bash
-
-python3 -m unittest tests/test_extractor.py```
+```bash
+python3 -m unittest tests/test_extractor.py
+```
